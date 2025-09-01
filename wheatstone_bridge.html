@@ -1,0 +1,259 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wheatstone Bridge Calculator - tirotir.by</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f5f5f5;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        canvas {
+            border: 1px solid #333;
+            background-color: white;
+            margin-top: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #result {
+            margin: 20px 0;
+            font-size: 18px;
+            line-height: 1.5;
+        }
+        .error {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+        @media (max-width: 600px) {
+            input, button {
+                width: 80%;
+            }
+            canvas {
+                width: 100%;
+                height: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Wheatstone Bridge Calculator</h1>
+    <p>Calculate unknown resistance or balance condition.</p>
+    <div class="input-group">
+        <label title="First resistance">R1 (ohms):</label>
+        <input type="number" id="r1" value="100" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label title="Second resistance">R2 (ohms):</label>
+        <input type="number" id="r2" value="100" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label title="Third resistance">R3 (ohms):</label>
+        <input type="number" id="r3" value="100" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label title="Bridge voltage">Voltage (V, volts):</label>
+        <input type="number" id="v" value="5" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label title="Unknown resistance to calculate">Calculate Rx (ohms):</label>
+        <input type="number" id="rx" placeholder="Leave blank to calculate" min="0.01" step="any">
+    </div>
+    <button onclick="calculateWheatstone()">Calculate</button>
+    <button onclick="resetForm()">Reset</button>
+    <button onclick="exportImage()">Export Image</button>
+    <div id="result"></div>
+    <canvas id="circuitCanvas" width="800" height="300"></canvas>
+    <footer>Powered by tirotir.by</footer>
+
+    <script>
+        function calculateWheatstone() {
+            const R1 = parseFloat(document.getElementById('r1').value);
+            const R2 = parseFloat(document.getElementById('r2').value);
+            const R3 = parseFloat(document.getElementById('r3').value);
+            const V = parseFloat(document.getElementById('v').value);
+            let Rx = parseFloat(document.getElementById('rx').value);
+            const resultDiv = document.getElementById('result');
+            const canvas = document.getElementById('circuitCanvas');
+            const ctx = canvas.getContext('2d');
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (isNaN(R1) || isNaN(R2) || isNaN(R3) || isNaN(V) || R1 <= 0 || R2 <= 0 || R3 <= 0 || V <= 0) {
+                resultDiv.innerHTML = '<span class="error">Invalid input: All resistances and voltage must be positive.</span>';
+                return;
+            }
+
+            if (isNaN(Rx)) {
+                Rx = (R3 * R2) / R1;
+                resultDiv.innerHTML = `Rx = ${(Rx).toFixed(2)} ohms (for balance)`;
+            } else if (Rx > 0) {
+                const Vout = V * (1 - (R2 / (R1 + Rx)) / (R3 / (R1 + Rx)));
+                resultDiv.innerHTML = `Vout = ${Vout.toFixed(2)} V with Rx = ${Rx.toFixed(2)} ohms`;
+            } else {
+                resultDiv.innerHTML = '<span class="error">Rx must be positive if provided.</span>';
+                return;
+            }
+
+            drawCircuit(ctx, R1, R2, R3, Rx, V);
+        }
+
+        function drawResistor(ctx, x, y, label) {
+            const width = 80;
+            const height = 25;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.moveTo(x - 50, y);
+            ctx.lineTo(x - width / 2, y);
+            ctx.strokeRect(x - width / 2, y - height / 2, width, height);
+            ctx.moveTo(x + width / 2, y);
+            ctx.lineTo(x + 50, y);
+            ctx.fillStyle = '#333';
+            ctx.font = '14px Arial';
+            ctx.fillText(label, x - 35, y - height / 2 - 8);
+            ctx.stroke();
+        }
+
+        function drawVoltageSource(ctx, x, y, label) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.arc(x, y, 20, 0, 2 * Math.PI);
+            ctx.moveTo(x - 20, y);
+            ctx.lineTo(x - 50, y);
+            ctx.moveTo(x + 20, y);
+            ctx.lineTo(x + 50, y);
+            ctx.fillStyle = '#333';
+            ctx.font = '14px Arial';
+            ctx.fillText(label, x - 15, y - 25);
+            ctx.stroke();
+        }
+
+        function drawCircuit(ctx, R1, R2, R3, Rx, V) {
+            const x = 400;
+            const y = 150;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            // Resistors
+            drawResistor(ctx, x - 100, y - 100, `R1 (${R1.toFixed(2)}Ω)`);
+            drawResistor(ctx, x + 100, y - 100, `R2 (${R2.toFixed(2)}Ω)`);
+            drawResistor(ctx, x - 100, y + 100, `R3 (${R3.toFixed(2)}Ω)`);
+            drawResistor(ctx, x + 100, y + 100, `Rx (${Rx.toFixed(2)}Ω)`);
+            // Voltage source
+            drawVoltageSource(ctx, x - 200, y, `V = ${V.toFixed(2)}V`);
+            // Connections
+            ctx.moveTo(x - 150, y - 100);
+            ctx.lineTo(x - 50, y - 100);
+            ctx.moveTo(x + 50, y - 100);
+            ctx.lineTo(x + 150, y - 100);
+            ctx.moveTo(x - 150, y + 100);
+            ctx.lineTo(x - 50, y + 100);
+            ctx.moveTo(x + 50, y + 100);
+            ctx.lineTo(x + 150, y + 100);
+            ctx.moveTo(x - 50, y - 100);
+            ctx.lineTo(x - 50, y + 100);
+            ctx.moveTo(x + 50, y - 100);
+            ctx.lineTo(x + 50, y + 100);
+            ctx.moveTo(x - 250, y);
+            ctx.lineTo(x - 150, y);
+            ctx.moveTo(x + 150, y);
+            ctx.lineTo(x + 250, y);
+            ctx.stroke();
+        }
+
+        function resetForm() {
+            document.getElementById('r1').value = '100';
+            document.getElementById('r2').value = '100';
+            document.getElementById('r3').value = '100';
+            document.getElementById('v').value = '5';
+            document.getElementById('rx').value = '';
+            document.getElementById('result').innerHTML = '';
+            const canvas = document.getElementById('circuitCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function exportImage() {
+            const canvas = document.getElementById('circuitCanvas');
+            setTimeout(() => {
+                const link = document.createElement('a');
+                link.download = 'wheatstone_bridge.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }, 100);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,292 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RC Filter Calculator - tirotir.by</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f5f5f5;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        input, select, button {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        canvas {
+            border: 1px solid #333;
+            background-color: white;
+            margin-top: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #result {
+            margin: 20px 0;
+            font-size: 18px;
+            line-height: 1.5;
+        }
+        .error {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+        @media (max-width: 600px) {
+            input, select, button {
+                width: 80%;
+            }
+            canvas {
+                width: 100%;
+                height: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>RC Filter Calculator</h1>
+    <p>Calculate cutoff frequency for RC low-pass or high-pass filter.</p>
+    <div class="input-group">
+        <label>Resistance (R, ohms):</label>
+        <input type="number" id="r" value="1000" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label>Capacitance (C, µF):</label>
+        <input type="number" id="c" value="0.1" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label>Filter Type:</label>
+        <select id="type">
+            <option value="low">Low-Pass</option>
+            <option value="high">High-Pass</option>
+        </select>
+    </div>
+    <button onclick="calculateRCFilter()">Calculate</button>
+    <button onclick="exportImage()">Export Image</button>
+    <div id="result"></div>
+    <canvas id="circuitCanvas" width="800" height="400"></canvas>
+    <footer>Powered by tirotir.by</footer>
+
+    <script>
+        function calculateRCFilter() {
+            const R = parseFloat(document.getElementById('r').value);
+            const C = parseFloat(document.getElementById('c').value) * 1e-6; // µF to F
+            const filterType = document.getElementById('type').value;
+            const resultDiv = document.getElementById('result');
+            const canvas = document.getElementById('circuitCanvas');
+            const ctx = canvas.getContext('2d');
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (isNaN(R) || isNaN(C) || R <= 0 || C <= 0) {
+                resultDiv.innerHTML = '<span class="error">Invalid input: R and C must be positive.</span>';
+                return;
+            }
+
+            const fc = 1 / (2 * Math.PI * R * C);
+            resultDiv.innerHTML = `Cutoff Frequency (fc) = ${fc.toFixed(2)} Hz<br>Filter Type: ${filterType.charAt(0).toUpperCase() + filterType.slice(1)}-Pass`;
+            drawCircuitAndGraph(ctx, R, C * 1e6, fc, filterType);
+        }
+
+        function drawResistor(ctx, x, y, label) {
+            const width = 80;
+            const height = 25;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.moveTo(x - 50, y);
+            ctx.lineTo(x - width / 2, y);
+            ctx.strokeRect(x - width / 2, y - height / 2, width, height);
+            ctx.moveTo(x + width / 2, y);
+            ctx.lineTo(x + 50, y);
+            ctx.fillStyle = '#333';
+            ctx.font = '14px Arial';
+            ctx.fillText(label, x - 35, y - height / 2 - 8);
+            ctx.stroke();
+        }
+
+        function drawCapacitor(ctx, x, y, label, isHorizontal = true) {
+            const width = 25;
+            const height = 40;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            if (isHorizontal) {
+                ctx.moveTo(x - 50, y);
+                ctx.lineTo(x - width / 2, y);
+                ctx.moveTo(x - width / 2, y - height / 2);
+                ctx.lineTo(x - width / 2, y + height / 2);
+                ctx.moveTo(x + width / 2, y - height / 2);
+                ctx.lineTo(x + width / 2, y + height / 2);
+                ctx.moveTo(x + width / 2, y);
+                ctx.lineTo(x + 50, y);
+                ctx.fillText(label, x - 40, y - height / 2 - 8);
+            } else {
+                ctx.moveTo(x, y - 50);
+                ctx.lineTo(x, y - height / 2);
+                ctx.moveTo(x - width / 2, y - height / 2);
+                ctx.lineTo(x + width / 2, y - height / 2);
+                ctx.moveTo(x - width / 2, y + height / 2);
+                ctx.lineTo(x + width / 2, y + height / 2);
+                ctx.moveTo(x, y + height / 2);
+                ctx.lineTo(x, y + 50);
+                ctx.fillText(label, x + width / 2 + 5, y);
+            }
+            ctx.stroke();
+        }
+
+        function drawCircuitAndGraph(ctx, R, C, fc, filterType) {
+            // Circuit
+            const x = 200;
+            const y = 100;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            if (filterType === 'low') {
+                // Low-pass: R in series, C to ground
+                drawResistor(ctx, x, y, `R (${R.toFixed(2)}Ω)`);
+                drawCapacitor(ctx, x + 150, y, `C (${C.toFixed(2)}µF)`, false);
+                ctx.moveTo(x - 50, y);
+                ctx.lineTo(x - 100, y); // Input
+                ctx.moveTo(x + 50, y);
+                ctx.lineTo(x + 100, y); // To C
+                ctx.moveTo(x + 100, y);
+                ctx.lineTo(x + 100, y + 50);
+                ctx.lineTo(x - 100, y + 50);
+                ctx.lineTo(x - 100, y); // Ground
+                ctx.fillText('Input', x - 120, y - 20);
+                ctx.fillText('Output', x + 80, y - 20);
+            } else {
+                // High-pass: C in series, R to ground
+                drawCapacitor(ctx, x, y, `C (${C.toFixed(2)}µF)`);
+                drawResistor(ctx, x + 150, y, `R (${R.toFixed(2)}Ω)`, false);
+                ctx.moveTo(x - 50, y);
+                ctx.lineTo(x - 100, y); // Input
+                ctx.moveTo(x + 50, y);
+                ctx.lineTo(x + 100, y); // To R
+                ctx.moveTo(x + 100, y);
+                ctx.lineTo(x + 100, y + 50);
+                ctx.lineTo(x - 100, y + 50);
+                ctx.lineTo(x - 100, y); // Ground
+                ctx.fillText('Input', x - 120, y - 20);
+                ctx.fillText('Output', x + 80, y - 20);
+            }
+            ctx.stroke();
+
+            // Graph (frequency response)
+            const graphX = 50;
+            const graphY = 300;
+            const graphWidth = 700;
+            const graphHeight = 100;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.moveTo(graphX, graphY);
+            ctx.lineTo(graphX + graphWidth, graphY); // X-axis
+            ctx.moveTo(graphX, graphY - graphHeight);
+            ctx.lineTo(graphX, graphY); // Y-axis
+            ctx.fillStyle = '#333';
+            ctx.font = '12px Arial';
+            ctx.fillText('Frequency (Hz)', graphX + graphWidth - 60, graphY + 15);
+            ctx.fillText('Gain (dB)', graphX - 30, graphY - graphHeight + 15);
+            ctx.stroke();
+
+            // Plot curve
+            ctx.beginPath();
+            ctx.strokeStyle = '#007bff';
+            ctx.lineWidth = 2;
+            for (let i = 0; i <= graphWidth; i++) {
+                const f = Math.pow(10, (i / graphWidth) * 5 - 2); // Log scale from 0.01 to 1000 Hz
+                let gain = filterType === 'low' ? 1 / Math.sqrt(1 + Math.pow(2 * Math.PI * f * R * C * 1e-6, 2)) : (2 * Math.PI * f * R * C * 1e-6) / Math.sqrt(1 + Math.pow(2 * Math.PI * f * R * C * 1e-6, 2));
+                gain = 20 * Math.log10(gain); // dB
+                const xPlot = graphX + i;
+                const yPlot = graphY - (gain + 40) / 40 * graphHeight; // Normalize from -40dB to 0dB
+                if (i === 0) ctx.moveTo(xPlot, yPlot);
+                else ctx.lineTo(xPlot, yPlot);
+            }
+            ctx.stroke();
+
+            // Mark cutoff
+            const fcLog = Math.log10(fc);
+            const xPoint = graphX + (fcLog + 2) / 5 * graphWidth;
+            const yPoint = graphY - (-3 + 40) / 40 * graphHeight; // -3dB
+            ctx.beginPath();
+            ctx.arc(xPoint, yPoint, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = '#d32f2f';
+            ctx.fill();
+            ctx.fillText(`fc = ${fc.toFixed(2)} Hz`, xPoint + 10, yPoint - 10);
+        }
+
+        function exportImage() {
+            const canvas = document.getElementById('circuitCanvas');
+            setTimeout(() => {
+                const link = document.createElement('a');
+                link.download = 'rc_filter.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }, 100);
+        }
+    </script>
+</body>
+</html>

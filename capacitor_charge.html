@@ -1,0 +1,288 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capacitor Charge/Discharge Calculator - tirotir.by</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f5f5f5;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        input, select {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        canvas {
+            border: 1px solid #333;
+            background-color: white;
+            margin-top: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #result {
+            margin: 20px 0;
+            font-size: 18px;
+            line-height: 1.5;
+        }
+        .error {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Capacitor Charge/Discharge Calculator</h1>
+    <p>Calculate the voltage across a capacitor in an RC circuit over time.</p>
+    <div class="input-group">
+        <label>Capacitance (C, µF):</label>
+        <input type="number" id="capacitance" value="100" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label>Resistance (R, ohms):</label>
+        <input type="number" id="resistance" value="1000" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label>Voltage Source (V, volts):</label>
+        <input type="number" id="voltage" value="5" min="0" step="any">
+    </div>
+    <div class="input-group">
+        <label>Time (t, seconds):</label>
+        <input type="number" id="time" value="0.1" min="0" step="any">
+    </div>
+    <div class="input-group">
+        <label>Mode:</label>
+        <select id="mode">
+            <option value="charge">Charging</option>
+            <option value="discharge">Discharging</option>
+        </select>
+    </div>
+    <button onclick="calculateCapacitor()">Calculate</button>
+    <button onclick="exportImage()">Export Image</button>
+    <div id="result"></div>
+    <canvas id="graphCanvas" width="800" height="400"></canvas>
+    <footer>Powered by tirotir.by</footer>
+
+    <script>
+        function calculateCapacitor() {
+            const C = parseFloat(document.getElementById('capacitance').value) * 1e-6; // Convert µF to F
+            const R = parseFloat(document.getElementById('resistance').value);
+            const V = parseFloat(document.getElementById('voltage').value);
+            const t = parseFloat(document.getElementById('time').value);
+            const mode = document.getElementById('mode').value;
+            const resultDiv = document.getElementById('result');
+            const canvas = document.getElementById('graphCanvas');
+            const ctx = canvas.getContext('2d');
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (isNaN(C) || isNaN(R) || isNaN(V) || isNaN(t) || C <= 0 || R <= 0 || t < 0 || V < 0) {
+                resultDiv.innerHTML = '<span class="error">Please enter valid positive numbers (time can be zero).</span>';
+                return;
+            }
+
+            const tau = R * C; // Time constant
+            let Vc;
+            if (mode === 'charge') {
+                Vc = V * (1 - Math.exp(-t / tau));
+                resultDiv.innerHTML = `Capacitor Voltage (Vc) = ${Vc.toFixed(3)} volts at t = ${t} seconds<br>`;
+                resultDiv.innerHTML += `Time Constant (τ) = ${(tau * 1000).toFixed(2)} ms`;
+            } else {
+                Vc = V * Math.exp(-t / tau);
+                resultDiv.innerHTML = `Capacitor Voltage (Vc) = ${Vc.toFixed(3)} volts at t = ${t} seconds<br>`;
+                resultDiv.innerHTML += `Time Constant (τ) = ${(tau * 1000).toFixed(2)} ms`;
+            }
+
+            drawCircuitAndGraph(ctx, C * 1e6, R, V, t, mode, Vc);
+        }
+
+        function drawCapacitor(ctx, x, y, label) {
+            const width = 20;
+            const height = 30;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.fillStyle = '#333';
+            ctx.font = '12px Arial';
+            ctx.moveTo(x - 30, y);
+            ctx.lineTo(x - width / 2, y);
+            ctx.moveTo(x - width / 2, y - height / 2);
+            ctx.lineTo(x - width / 2, y + height / 2);
+            ctx.moveTo(x + width / 2, y - height / 2);
+            ctx.lineTo(x + width / 2, y + height / 2);
+            ctx.moveTo(x + width / 2, y);
+            ctx.lineTo(x + 30, y);
+            ctx.fillText(label, x - 10, y - height / 2 - 5);
+            ctx.stroke();
+        }
+
+        function drawVoltageSource(ctx, x, y, label) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.fillStyle = '#333';
+            ctx.font = '12px Arial';
+            ctx.arc(x, y, 15, 0, 2 * Math.PI);
+            ctx.moveTo(x - 15, y);
+            ctx.lineTo(x - 30, y);
+            ctx.moveTo(x + 15, y);
+            ctx.lineTo(x + 30, y);
+            ctx.fillText(label, x - 10, y - 20);
+            ctx.stroke();
+        }
+
+        function drawCircuitAndGraph(ctx, C, R, V, t, mode, Vc) {
+            // Draw circuit (top half)
+            const x = 400;
+            const y = 100;
+            ctx.beginPath();
+            ctx.moveTo(x - 150, y);
+            drawVoltageSource(ctx, x - 80, y, `${V.toFixed(2)}V`);
+            drawResistor(ctx, x, y, `${R.toFixed(2)}Ω`);
+            drawCapacitor(ctx, x + 80, y, `${C.toFixed(2)}µF`);
+            ctx.moveTo(x + 110, y);
+            ctx.lineTo(x + 150, y);
+            ctx.lineTo(x + 150, y + 50);
+            ctx.lineTo(x - 150, y + 50);
+            ctx.lineTo(x - 150, y);
+            ctx.stroke();
+
+            // Draw graph (bottom half)
+            const graphX = 50;
+            const graphY = 350;
+            const graphWidth = 700;
+            const graphHeight = 100;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 1;
+            ctx.moveTo(graphX, graphY);
+            ctx.lineTo(graphX + graphWidth, graphY); // X-axis
+            ctx.moveTo(graphX, graphY - graphHeight);
+            ctx.lineTo(graphX, graphY); // Y-axis
+            ctx.fillStyle = '#333';
+            ctx.font = '12px Arial';
+            ctx.fillText('Time (s)', graphX + graphWidth - 30, graphY + 15);
+            ctx.fillText('Voltage (V)', graphX - 30, graphY - graphHeight + 15);
+            ctx.stroke();
+
+            // Plot curve
+            const tau = R * C * 1e-6;
+            const tMax = 5 * tau; // 5 time constants
+            ctx.beginPath();
+            ctx.strokeStyle = '#007bff';
+            ctx.lineWidth = 2;
+            for (let i = 0; i <= graphWidth; i++) {
+                const tPlot = (i / graphWidth) * tMax;
+                const vPlot = mode === 'charge' ? V * (1 - Math.exp(-tPlot / tau)) : V * Math.exp(-tPlot / tau);
+                const xPlot = graphX + i;
+                const yPlot = graphY - (vPlot / V) * graphHeight;
+                if (i === 0) ctx.moveTo(xPlot, yPlot);
+                else ctx.lineTo(xPlot, yPlot);
+            }
+            ctx.stroke();
+
+            // Mark specific point
+            const xPoint = graphX + (t / tMax) * graphWidth;
+            const yPoint = graphY - (Vc / V) * graphHeight;
+            ctx.beginPath();
+            ctx.arc(xPoint, yPoint, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = '#d32f2f';
+            ctx.fill();
+        }
+
+        function drawResistor(ctx, x, y, label) {
+            const width = 40;
+            const height = 20;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.fillStyle = '#333';
+            ctx.font = '12px Arial';
+            ctx.moveTo(x - 30, y);
+            ctx.lineTo(x - width / 2, y);
+            ctx.strokeRect(x - width / 2, y - height / 2, width, height);
+            ctx.moveTo(x + width / 2, y);
+            ctx.lineTo(x + 30, y);
+            ctx.fillText(label, x - 10, y - height / 2 - 5);
+            ctx.stroke();
+        }
+
+        function exportImage() {
+            const canvas = document.getElementById('graphCanvas');
+            setTimeout(() => {
+                const link = document.createElement('a');
+                link.download = 'capacitor_charge.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }, 100);
+        }
+    </script>
+</body>
+</html>

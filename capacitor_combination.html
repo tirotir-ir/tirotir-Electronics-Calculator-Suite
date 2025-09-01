@@ -1,0 +1,240 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capacitor Combination Calculator - tirotir.by</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f5f5f5;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        input, select {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        canvas {
+            border: 1px solid #333;
+            background-color: white;
+            margin-top: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #result {
+            margin: 20px 0;
+            font-size: 18px;
+            line-height: 1.5;
+        }
+        .error {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Capacitor Combination Calculator</h1>
+    <p>Calculate the equivalent capacitance for a combination of identical capacitors.</p>
+    <div class="input-group">
+        <label>Single Capacitor Value (µF):</label>
+        <input type="number" id="capacitorValue" value="100" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label>Number of Capacitors:</label>
+        <input type="number" id="numCapacitors" value="2" min="1">
+    </div>
+    <div class="input-group">
+        <label>Configuration:</label>
+        <select id="configuration">
+            <option value="series">Series</option>
+            <option value="parallel">Parallel</option>
+        </select>
+    </div>
+    <button onclick="calculateCapacitance()">Calculate</button>
+    <button onclick="exportImage()">Export Image</button>
+    <div id="result"></div>
+    <canvas id="circuitCanvas" width="800" height="500"></canvas>
+    <footer>Powered by tirotir.by</footer>
+
+    <script>
+        function calculateCapacitance() {
+            const C = parseFloat(document.getElementById('capacitorValue').value) * 1e-6; // Convert µF to F
+            const numCapacitors = parseInt(document.getElementById('numCapacitors').value);
+            const config = document.getElementById('configuration').value;
+            const resultDiv = document.getElementById('result');
+            const canvas = document.getElementById('circuitCanvas');
+            const ctx = canvas.getContext('2d');
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (isNaN(C) || isNaN(numCapacitors) || C <= 0 || numCapacitors < 1) {
+                resultDiv.innerHTML = '<span class="error">Please enter valid positive numbers.</span>';
+                return;
+            }
+
+            let equivalentC;
+            if (config === 'series') {
+                equivalentC = 1 / (numCapacitors / C); // 1/Ceq = 1/C1 + 1/C2 + ...
+                resultDiv.innerHTML = `Equivalent Capacitance = ${(equivalentC * 1e6).toFixed(2)} µF (Series)`;
+                drawSeries(ctx, numCapacitors, C * 1e6);
+            } else {
+                equivalentC = C * numCapacitors; // Ceq = C1 + C2 + ...
+                resultDiv.innerHTML = `Equivalent Capacitance = ${(equivalentC * 1e6).toFixed(2)} µF (Parallel)`;
+                drawParallel(ctx, numCapacitors, C * 1e6);
+            }
+        }
+
+        function drawCapacitor(ctx, x, y, label, isHorizontal = true) {
+            const width = 20;
+            const height = 30;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.fillStyle = '#333';
+            ctx.font = '12px Arial';
+            if (isHorizontal) {
+                ctx.moveTo(x - 30, y);
+                ctx.lineTo(x - width / 2, y);
+                ctx.moveTo(x - width / 2, y - height / 2);
+                ctx.lineTo(x - width / 2, y + height / 2);
+                ctx.moveTo(x + width / 2, y - height / 2);
+                ctx.lineTo(x + width / 2, y + height / 2);
+                ctx.moveTo(x + width / 2, y);
+                ctx.lineTo(x + 30, y);
+                ctx.fillText(label, x - 10, y - height / 2 - 5);
+            } else {
+                ctx.moveTo(x, y - 30);
+                ctx.lineTo(x, y - height / 2);
+                ctx.moveTo(x - width / 2, y - height / 2);
+                ctx.lineTo(x + width / 2, y - height / 2);
+                ctx.moveTo(x - width / 2, y + height / 2);
+                ctx.lineTo(x + width / 2, y + height / 2);
+                ctx.moveTo(x, y + height / 2);
+                ctx.lineTo(x, y + 30);
+                ctx.fillText(label, x + width / 2 + 5, y);
+            }
+            ctx.stroke();
+        }
+
+        function drawJunction(ctx, x, y) {
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = '#333';
+            ctx.fill();
+        }
+
+        function drawSeries(ctx, count, C) {
+            const startX = 100;
+            const y = 250;
+            let x = startX;
+            ctx.beginPath();
+            ctx.moveTo(x - 50, y);
+            for (let i = 0; i < count; i++) {
+                drawCapacitor(ctx, x, y, `C${i + 1} (${C.toFixed(2)}µF)`);
+                x += 60;
+            }
+            ctx.moveTo(x - 30, y);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+        }
+
+        function drawParallel(ctx, count, C) {
+            const startX = 400;
+            const startY = 250 - (count - 1) * 30;
+            const endX = startX + 60;
+            ctx.beginPath();
+            ctx.moveTo(startX - 50, startY + (count - 1) * 15);
+            ctx.lineTo(startX, startY + (count - 1) * 15);
+            drawJunction(ctx, startX, startY + (count - 1) * 15);
+            ctx.moveTo(endX, startY + (count - 1) * 15);
+            ctx.lineTo(endX + 50, startY + (count - 1) * 15);
+            drawJunction(ctx, endX, startY + (count - 1) * 15);
+            for (let i = 0; i < count; i++) {
+                const y = startY + i * 30;
+                drawCapacitor(ctx, startX + 30, y, `C${i + 1} (${C.toFixed(2)}µF)`);
+                ctx.moveTo(startX, y);
+                ctx.lineTo(startX, startY + (count - 1) * 15);
+                ctx.moveTo(endX, y);
+                ctx.lineTo(endX, startY + (count - 1) * 15);
+            }
+            ctx.stroke();
+        }
+
+        function exportImage() {
+            const canvas = document.getElementById('circuitCanvas');
+            setTimeout(() => {
+                const link = document.createElement('a');
+                link.download = 'capacitor_combination.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }, 100);
+        }
+    </script>
+</body>
+</html>

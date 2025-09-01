@@ -1,0 +1,362 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resistor Combination Calculator - tirotir.by</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f5f5f5;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        input {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        canvas {
+            border: 1px solid #333;
+            background-color: white;
+            margin-top: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #result {
+            margin: 20px 0;
+            font-size: 18px;
+            line-height: 1.5;
+        }
+        .error {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Resistor Combination Calculator</h1>
+    <p>Enter the resistor value, desired resistance, and maximum number of resistors to find the best combination.</p>
+    <div class="input-group">
+        <label>Single Resistor Value (ohms):</label>
+        <input type="number" id="resistorValue" value="100" min="0.01">
+    </div>
+    <div class="input-group">
+        <label>Desired Resistance (ohms):</label>
+        <input type="number" id="targetResistance" placeholder="e.g., 350" min="0.01">
+    </div>
+    <div class="input-group">
+        <label>Max Number of Resistors:</label>
+        <input type="number" id="maxResistors" value="10" min="1">
+    </div>
+    <button onclick="calculateResistance()">Calculate</button>
+    <button onclick="exportImage()">Export Image</button>
+    <div id="result"></div>
+    <canvas id="circuitCanvas" width="800" height="500"></canvas>
+    <footer>Powered by tirotir.by</footer>
+
+    <script>
+        function calculateResistance() {
+            const R = parseFloat(document.getElementById('resistorValue').value);
+            const target = parseFloat(document.getElementById('targetResistance').value);
+            const maxResistors = parseInt(document.getElementById('maxResistors').value);
+            const resultDiv = document.getElementById('result');
+            const canvas = document.getElementById('circuitCanvas');
+            const ctx = canvas.getContext('2d');
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (isNaN(R) || isNaN(target) || isNaN(maxResistors) || R <= 0 || target <= 0 || maxResistors < 1) {
+                resultDiv.innerHTML = '<span class="error">Please enter valid positive numbers.</span>';
+                return;
+            }
+
+            let bestConfig = null;
+            let bestError = Infinity;
+            let bestResistance = 0;
+
+            // Series: R * n
+            for (let n = 1; n <= maxResistors; n++) {
+                const seriesR = R * n;
+                const error = Math.abs(seriesR - target);
+                if (error < bestError) {
+                    bestError = error;
+                    bestResistance = seriesR;
+                    bestConfig = { type: 'series', count: n, parallelGroups: [] };
+                }
+            }
+
+            // Parallel: R / n
+            for (let n = 1; n <= maxResistors; n++) {
+                const parallelR = R / n;
+                const error = Math.abs(parallelR - target);
+                if (error < bestError) {
+                    bestError = error;
+                    bestResistance = parallelR;
+                    bestConfig = { type: 'parallel', count: n, parallelGroups: [{ count: n }] };
+                }
+            }
+
+            // Hybrid: m groups in series, each with k resistors in parallel
+            for (let m = 1; m <= maxResistors; m++) {
+                for (let k = 1; k <= maxResistors - m + 1; k++) {
+                    if (m * k <= maxResistors) {
+                        const groupR = R / k;
+                        const totalR = groupR * m;
+                        const error = Math.abs(totalR - target);
+                        if (error < bestError) {
+                            bestError = error;
+                            bestResistance = totalR;
+                            bestConfig = { type: 'hybrid', seriesCount: m, parallelGroups: Array(m).fill({ count: k }) };
+                        }
+                    }
+                }
+            }
+
+            // New: Series with one parallel group (e.g., n resistors in series + one parallel group of k resistors)
+            for (let n = 0; n <= maxResistors; n++) {
+                for (let k = 2; k <= maxResistors - n; k++) {
+                    if (n + k <= maxResistors) {
+                        const parallelR = R / k;
+                        const totalR = n * R + parallelR;
+                        const error = Math.abs(totalR - target);
+                        if (error < bestError) {
+                            bestError = error;
+                            bestResistance = totalR;
+                            bestConfig = { type: 'series_with_parallel', seriesCount: n, parallelCount: k };
+                        }
+                    }
+                }
+            }
+
+            resultDiv.innerHTML = `Best match: ${bestResistance.toFixed(2)} ohms (error: ${bestError.toFixed(2)} ohms)<br>`;
+            if (bestConfig.type === 'series') {
+                resultDiv.innerHTML += `Use ${bestConfig.count} resistors in series.`;
+                drawSeries(ctx, bestConfig.count, R);
+            } else if (bestConfig.type === 'parallel') {
+                resultDiv.innerHTML += `Use ${bestConfig.count} resistors in parallel.`;
+                drawParallel(ctx, bestConfig.count, R);
+            } else if (bestConfig.type === 'hybrid') {
+                const totalResistors = bestConfig.parallelGroups.reduce((sum, g) => sum + g.count, 0);
+                resultDiv.innerHTML += `Use ${totalResistors} resistors: ${bestConfig.seriesCount} groups in series, each with ${bestConfig.parallelGroups[0].count} resistors in parallel.`;
+                drawHybrid(ctx, bestConfig.seriesCount, bestConfig.parallelGroups[0].count, R);
+            } else {
+                resultDiv.innerHTML += `Use ${bestConfig.seriesCount + bestConfig.parallelCount} resistors: ${bestConfig.seriesCount} in series, plus ${bestConfig.parallelCount} in parallel.`;
+                drawSeriesWithParallel(ctx, bestConfig.seriesCount, bestConfig.parallelCount, R);
+            }
+        }
+
+        function drawResistor(ctx, x, y, label, isHorizontal = true) {
+            const width = 60;
+            const height = 20;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.fillStyle = '#333';
+            ctx.font = '12px Arial';
+            if (isHorizontal) {
+                ctx.moveTo(x - 40, y);
+                ctx.lineTo(x - width / 2, y);
+                ctx.strokeRect(x - width / 2, y - height / 2, width, height);
+                ctx.moveTo(x + width / 2, y);
+                ctx.lineTo(x + 40, y);
+                ctx.fillText(label, x - 25, y - height / 2 - 5);
+            } else {
+                ctx.moveTo(x, y - 40);
+                ctx.lineTo(x, y - height / 2);
+                ctx.strokeRect(x - width / 2, y - height / 2, width, height);
+                ctx.moveTo(x, y + height / 2);
+                ctx.lineTo(x, y + 40);
+                ctx.fillText(label, x + width / 2 + 5, y);
+            }
+            ctx.stroke();
+        }
+
+        function drawJunction(ctx, x, y) {
+            ctx.beginPath();
+            ctx.arc(x, y, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = '#333';
+            ctx.fill();
+        }
+
+        function drawSeries(ctx, count, R) {
+            const startX = 50;
+            const y = 250;
+            const spacing = 120;
+            let x = startX;
+            ctx.beginPath();
+            ctx.moveTo(x - 50, y);
+            for (let i = 0; i < count; i++) {
+                drawResistor(ctx, x, y, `R${i + 1} (${R.toFixed(2)}Ω)`);
+                x += spacing;
+            }
+            ctx.moveTo(x - 40, y);
+            ctx.lineTo(x + 50, y);
+            ctx.stroke();
+        }
+
+        function drawParallel(ctx, count, R) {
+            const startX = 200;
+            const y = 250;
+            const verticalSpacing = 60;
+            const startY = y - (count - 1) * verticalSpacing / 2;
+            const endX = startX + 120;
+            ctx.beginPath();
+            ctx.moveTo(startX - 50, y);
+            ctx.lineTo(startX, y);
+            drawJunction(ctx, startX, y);
+            ctx.moveTo(endX, y);
+            ctx.lineTo(endX + 50, y);
+            drawJunction(ctx, endX, y);
+            for (let i = 0; i < count; i++) {
+                const posY = startY + i * verticalSpacing;
+                drawResistor(ctx, startX + 60, posY, `R${i + 1} (${R.toFixed(2)}Ω)`);
+                ctx.moveTo(startX, posY);
+                ctx.lineTo(startX, y);
+                ctx.moveTo(endX, posY);
+                ctx.lineTo(endX, y);
+            }
+            ctx.stroke();
+        }
+
+        function drawHybrid(ctx, seriesCount, parallelCount, R) {
+            const startX = 50;
+            const y = 250;
+            const groupSpacing = 140;
+            const verticalSpacing = 60;
+            let x = startX;
+            ctx.beginPath();
+            ctx.moveTo(x - 50, y);
+            let resistorIndex = 1;
+            for (let i = 0; i < seriesCount; i++) {
+                const startY = y - (parallelCount - 1) * verticalSpacing / 2;
+                if (parallelCount > 1) {
+                    drawJunction(ctx, x, y);
+                }
+                for (let j = 0; j < parallelCount;j++) {
+                    const yPos = startY + j * verticalSpacing;
+                    drawResistor(ctx, x + 60, yPos, `R${resistorIndex++} (${R.toFixed(2)}Ω)`);
+                    if (parallelCount > 1) {
+                        ctx.moveTo(x, yPos);
+                        ctx.lineTo(x, y);
+                        ctx.moveTo(x + 120, yPos);
+                        ctx.lineTo(x + 120, y);
+                    }
+                }
+                if (parallelCount > 1) {
+                    drawJunction(ctx, x + 120, y);
+                }
+                x += groupSpacing;
+            }
+            ctx.moveTo(x - 40, y);
+            ctx.lineTo(x + 50, y);
+            ctx.stroke();
+        }
+
+        function drawSeriesWithParallel(ctx, seriesCount, parallelCount, R) {
+            const startX = 50;
+            const y = 250;
+            const seriesSpacing = 120;
+            const verticalSpacing = 60;
+            let x = startX;
+            ctx.beginPath();
+            ctx.moveTo(x - 50, y);
+            let resistorIndex = 1;
+            // Draw series resistors
+            for (let i = 0; i < seriesCount; i++) {
+                drawResistor(ctx, x, y, `R${resistorIndex++} (${R.toFixed(2)}Ω)`);
+                x += seriesSpacing;
+            }
+            // Draw parallel group
+            const startY = y - (parallelCount - 1) * verticalSpacing / 2;
+            drawJunction(ctx, x, y);
+            for (let i = 0; i < parallelCount; i++) {
+                const yPos = startY + i * verticalSpacing;
+                drawResistor(ctx, x + 60, yPos, `R${resistorIndex++} (${R.toFixed(2)}Ω)`);
+                ctx.moveTo(x, yPos);
+                ctx.lineTo(x, y);
+                ctx.moveTo(x + 120, yPos);
+                ctx.lineTo(x + 120, y);
+            }
+            drawJunction(ctx, x + 120, y);
+            ctx.moveTo(x + 120, y);
+            ctx.lineTo(x + 170, y);
+            ctx.stroke();
+        }
+
+        function exportImage() {
+            const canvas = document.getElementById('circuitCanvas');
+            setTimeout(() => {
+                const link = document.createElement('a');
+                link.download = 'resistor_combination.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }, 100);
+        }
+    </script>
+</body>
+</html>

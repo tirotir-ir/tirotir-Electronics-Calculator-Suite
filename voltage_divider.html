@@ -1,0 +1,242 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voltage Divider Calculator - tirotir.by</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f5f5f5;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        canvas {
+            border: 1px solid #333;
+            background-color: white;
+            margin-top: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #result {
+            margin: 20px 0;
+            font-size: 18px;
+            line-height: 1.5;
+        }
+        .error {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+        @media (max-width: 600px) {
+            input, button {
+                width: 80%;
+            }
+            canvas {
+                width: 100%;
+                height: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Voltage Divider Calculator</h1>
+    <p>Calculate resistor values or output voltage for a voltage divider circuit.</p>
+    <div class="input-group">
+        <label>Input Voltage (Vin, volts):</label>
+        <input type="number" id="vin" value="12" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label>Desired Output Voltage (Vout, volts):</label>
+        <input type="number" id="vout" value="5" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label>Resistor 1 (R1, ohms) - Optional:</label>
+        <input type="number" id="r1" placeholder="Leave blank to calculate" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label>Resistor 2 (R2, ohms) - Optional:</label>
+        <input type="number" id="r2" placeholder="Leave blank to calculate" min="0.01" step="any">
+    </div>
+    <button onclick="calculateVoltageDivider()">Calculate</button>
+    <button onclick="exportImage()">Export Image</button>
+    <div id="result"></div>
+    <canvas id="circuitCanvas" width="800" height="300"></canvas>
+    <footer>Powered by tirotir.by</footer>
+
+    <script>
+        function calculateVoltageDivider() {
+            const Vin = parseFloat(document.getElementById('vin').value);
+            const Vout = parseFloat(document.getElementById('vout').value);
+            let R1 = parseFloat(document.getElementById('r1').value);
+            let R2 = parseFloat(document.getElementById('r2').value);
+            const resultDiv = document.getElementById('result');
+            const canvas = document.getElementById('circuitCanvas');
+            const ctx = canvas.getContext('2d');
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (isNaN(Vin) || isNaN(Vout) || Vin <= 0 || Vout <= 0 || Vout > Vin) {
+                resultDiv.innerHTML = '<span class="error">Invalid input: Vin must be positive and greater than Vout.</span>';
+                return;
+            }
+
+            if (isNaN(R1) && isNaN(R2)) {
+                R2 = 1000;
+                R1 = R2 * (Vin / Vout - 1);
+            } else if (isNaN(R1)) {
+                R1 = R2 * (Vin / Vout - 1);
+            } else if (isNaN(R2)) {
+                R2 = R1 * (Vout / (Vin - Vout));
+            } else {
+                const calculatedVout = Vin * (R2 / (R1 + R2));
+                if (Math.abs(calculatedVout - Vout) > 0.01) {
+                    resultDiv.innerHTML = '<span class="error">Provided R1 and R2 do not match Vout. Calculated Vout = ' + calculatedVout.toFixed(2) + 'V</span>';
+                    return;
+                }
+            }
+
+            if (R1 <= 0 || R2 <= 0) {
+                resultDiv.innerHTML = '<span class="error">Resistors must be positive.</span>';
+                return;
+            }
+
+            const calculatedVout = Vin * (R2 / (R1 + R2));
+            resultDiv.innerHTML = `R1 = ${R1.toFixed(2)} ohms, R2 = ${R2.toFixed(2)} ohms<br>Vout = ${calculatedVout.toFixed(2)} V`;
+            drawCircuit(ctx, Vin, calculatedVout, R1, R2);
+        }
+
+        function drawVoltageSource(ctx, x, y, label) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.arc(x, y, 20, 0, 2 * Math.PI);
+            ctx.moveTo(x - 20, y);
+            ctx.lineTo(x - 50, y);
+            ctx.moveTo(x + 20, y);
+            ctx.lineTo(x + 50, y);
+            ctx.fillStyle = '#333';
+            ctx.font = '14px Arial';
+            ctx.fillText(label, x - 15, y - 25);
+            ctx.stroke();
+        }
+
+        function drawResistor(ctx, x, y, label) {
+            const width = 80;
+            const height = 25;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.moveTo(x - 50, y);
+            ctx.lineTo(x - width / 2, y);
+            ctx.strokeRect(x - width / 2, y - height / 2, width, height);
+            ctx.moveTo(x + width / 2, y);
+            ctx.lineTo(x + 50, y);
+            ctx.fillStyle = '#333';
+            ctx.font = '14px Arial';
+            ctx.fillText(label, x - 35, y - height / 2 - 8);
+            ctx.stroke();
+        }
+
+        function drawCircuit(ctx, Vin, Vout, R1, R2) {
+            const x = 200;
+            const y = 150;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            drawVoltageSource(ctx, x, y, `Vin = ${Vin.toFixed(2)}V`);
+            let resX = x + 150;
+            drawResistor(ctx, resX, y, `R1 (${R1.toFixed(2)}Ω)`);
+            resX += 150;
+            drawResistor(ctx, resX, y, `R2 (${R2.toFixed(2)}Ω)`);
+            ctx.moveTo(x + 50, y);
+            ctx.lineTo(resX - 150, y);
+            ctx.moveTo(resX - 50, y);
+            ctx.lineTo(resX + 50, y);
+            ctx.moveTo(resX + 50, y);
+            ctx.lineTo(resX + 50, y + 50);
+            ctx.lineTo(x - 50, y + 50);
+            ctx.lineTo(x - 50, y);
+            ctx.fillStyle = '#333';
+            ctx.font = '14px Arial';
+            ctx.fillText(`Vout = ${Vout.toFixed(2)}V`, resX - 20, y - 30);
+            ctx.stroke();
+        }
+
+        function exportImage() {
+            const canvas = document.getElementById('circuitCanvas');
+            setTimeout(() => {
+                const link = document.createElement('a');
+                link.download = 'voltage_divider.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }, 100);
+        }
+    </script>
+</body>
+</html>

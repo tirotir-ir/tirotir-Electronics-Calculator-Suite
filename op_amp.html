@@ -1,0 +1,360 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Op-Amp Calculator - tirotir.by</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        h1 {
+            margin-bottom: 20px;
+            color: #007bff;
+        }
+        .input-group {
+            margin: 15px 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        label {
+            margin-right: 10px;
+            font-weight: bold;
+            min-width: 200px;
+            text-align: right;
+        }
+        input, select {
+            padding: 8px;
+            margin: 5px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 150px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        canvas {
+            border: 1px solid #333;
+            background-color: white;
+            margin-top: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            max-width: 100%;
+            height: auto;
+        }
+        #result {
+            margin: 20px 0;
+            font-size: 18px;
+            line-height: 1.5;
+            color: #444;
+        }
+        .error {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+        @media (max-width: 600px) {
+            .input-group {
+                flex-direction: column;
+                text-align: left;
+            }
+            label {
+                text-align: left;
+                margin-right: 0;
+                margin-bottom: 5px;
+            }
+            input, select, button {
+                width: 100%;
+                max-width: 300px;
+            }
+            canvas {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Op-Amp Calculator</h1>
+    <p>Calculate gain and resistor values for op-amp circuits.</p>
+    <div class="input-group">
+        <label title="Supply voltage for the op-amp">Supply Voltage (Vcc, volts):</label>
+        <input type="number" id="vcc" value="12" min="0.01" step="0.01" required>
+    </div>
+    <div class="input-group">
+        <label title="Desired voltage gain">Desired Gain (A):</label>
+        <input type="number" id="gain" value="2" min="1" step="0.1" required>
+    </div>
+    <div class="input-group">
+        <label title="Feedback resistor value">Feedback Resistor (Rf, ohms):</label>
+        <input type="number" id="rf" placeholder="Leave blank to calculate" min="1" step="1">
+    </div>
+    <div class="input-group">
+        <label title="Configuration type">Configuration:</label>
+        <select id="config" aria-label="Select op-amp configuration">
+            <option value="non-inverting">Non-Inverting</option>
+            <option value="inverting">Inverting</option>
+        </select>
+    </div>
+    <div class="input-group">
+        <button onclick="calculateOpAmp()">Calculate</button>
+        <button onclick="resetForm()">Reset</button>
+        <button onclick="exportImage()">Export Image</button>
+    </div>
+    <div id="result"></div>
+    <canvas id="circuitCanvas" width="800" height="300"></canvas>
+    <footer>Powered by tirotir.by</footer>
+
+    <script>
+        function calculateOpAmp() {
+            const vcc = parseFloat(document.getElementById('vcc').value);
+            const gain = parseFloat(document.getElementById('gain').value);
+            const rf = parseFloat(document.getElementById('rf').value) || null;
+            const config = document.getElementById('config').value;
+            const resultDiv = document.getElementById('result');
+            const canvas = document.getElementById('circuitCanvas');
+            const ctx = canvas.getContext('2d');
+
+            // Clear previous content
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            resultDiv.innerHTML = '';
+
+            // Input validation
+            if (isNaN(vcc) || vcc <= 0) {
+                resultDiv.innerHTML = '<span class="error">Supply voltage must be a positive number.</span>';
+                return;
+            }
+            if (isNaN(gain) || gain < 1) {
+                resultDiv.innerHTML = '<span class="error">Gain must be at least 1.</span>';
+                return;
+            }
+            if (rf !== null && (isNaN(rf) || rf <= 0)) {
+                resultDiv.innerHTML = '<span class="error">Feedback resistor must be a positive number if provided.</span>';
+                return;
+            }
+
+            let rg;
+            if (rf === null) {
+                rf = 10000; // Default feedback resistor value
+                if (config === 'non-inverting') {
+                    rg = rf / (gain - 1);
+                } else { // inverting
+                    rg = rf / (gain + 1); // Gain = -Rf/Rg for inverting
+                }
+            } else {
+                if (config === 'non-inverting') {
+                    rg = rf / (gain - 1);
+                } else {
+                    rg = rf / (gain + 1);
+                }
+                // Verify calculated gain matches input
+                const calculatedGain = config === 'non-inverting' ? 1 + rf / rg : -rf / rg;
+                if (Math.abs(calculatedGain - gain) > 0.1) {
+                    resultDiv.innerHTML = '<span class="error">Provided Rf and calculated Rg do not match the desired gain. Recalculate with adjusted Rf.</span>';
+                    return;
+                }
+            }
+
+            // Calculate max output (90% of Vcc to avoid saturation)
+            const maxOutput = vcc * 0.9;
+
+            // Display results
+            resultDiv.innerHTML = `Feedback Resistor (Rf) = ${rf.toFixed(2)} ohms<br>
+                                  Gain Resistor (Rg) = ${rg.toFixed(2)} ohms<br>
+                                  Gain = ${config === 'inverting' ? '-' : ''}${gain.toFixed(2)}<br>
+                                  Max Output Voltage = ${maxOutput.toFixed(2)} V`;
+
+            // Draw circuit
+            drawCircuit(ctx, vcc, rf, rg, config);
+        }
+
+        function drawOpAmp(ctx, x, y) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.moveTo(x - 50, y - 50);
+            ctx.lineTo(x + 50, y - 50);
+            ctx.lineTo(x + 30, y + 50);
+            ctx.lineTo(x - 30, y + 50);
+            ctx.closePath();
+            ctx.moveTo(x, y - 50);
+            ctx.lineTo(x, y - 80); // Output
+            ctx.moveTo(x - 30, y + 25);
+            ctx.lineTo(x - 60, y + 25); // Inverting input
+            ctx.moveTo(x + 30, y + 25);
+            ctx.lineTo(x + 60, y + 25); // Non-inverting input
+            ctx.stroke();
+        }
+
+        function drawResistor(ctx, x, y, label, isHorizontal = true) {
+            const width = 80;
+            const height = 25;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            if (isHorizontal) {
+                ctx.moveTo(x - 50, y);
+                ctx.lineTo(x - width / 2, y);
+                ctx.strokeRect(x - width / 2, y - height / 2, width, height);
+                ctx.moveTo(x + width / 2, y);
+                ctx.lineTo(x + 50, y);
+                ctx.fillText(label, x - 35, y - height / 2 - 8);
+            } else {
+                ctx.moveTo(x, y - 50);
+                ctx.lineTo(x, y - height / 2);
+                ctx.strokeRect(x - width / 2, y - height / 2, width, height);
+                ctx.moveTo(x, y + height / 2);
+                ctx.lineTo(x, y + 50);
+                ctx.fillText(label, x + width / 2 + 5, y);
+            }
+            ctx.fillStyle = '#333';
+            ctx.font = '14px Arial';
+            ctx.stroke();
+        }
+
+        function drawVoltageSource(ctx, x, y, label) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            ctx.arc(x, y, 20, 0, 2 * Math.PI);
+            ctx.moveTo(x - 20, y);
+            ctx.lineTo(x - 50, y);
+            ctx.moveTo(x + 20, y);
+            ctx.lineTo(x + 50, y);
+            ctx.fillStyle = '#333';
+            ctx.font = '14px Arial';
+            ctx.fillText(label, x - 15, y - 25);
+            ctx.stroke();
+        }
+
+        function drawCircuit(ctx, vcc, rf, rg, config) {
+            const x = 400;
+            const y = 150;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            drawVoltageSource(ctx, x - 150, y, `Vcc = ${vcc.toFixed(2)}V`);
+            drawOpAmp(ctx, x, y);
+            if (config === 'non-inverting') {
+                drawResistor(ctx, x + 80, y - 100, `Rf (${rf.toFixed(2)}Ω)`);
+                drawResistor(ctx, x + 80, y, `Rg (${rg.toFixed(2)}Ω)`);
+                ctx.moveTo(x + 60, y + 25); // Non-inverting input to ground
+                ctx.lineTo(x + 80, y);
+                ctx.moveTo(x + 80, y);
+                ctx.lineTo(x + 130, y);
+                ctx.moveTo(x, y - 50); // Output to Rf
+                ctx.lineTo(x + 80, y - 100);
+                ctx.moveTo(x + 80, y - 100);
+                ctx.lineTo(x + 130, y - 100);
+            } else { // inverting
+                drawResistor(ctx, x - 80, y - 100, `Rf (${rf.toFixed(2)}Ω)`);
+                drawResistor(ctx, x - 80, y, `Rg (${rg.toFixed(2)}Ω)`);
+                ctx.moveTo(x - 60, y + 25); // Inverting input to Rg
+                ctx.lineTo(x - 80, y);
+                ctx.moveTo(x - 80, y);
+                ctx.lineTo(x - 130, y);
+                ctx.moveTo(x, y - 50); // Output to Rf
+                ctx.lineTo(x - 80, y - 100);
+                ctx.moveTo(x - 80, y - 100);
+                ctx.lineTo(x - 130, y - 100);
+            }
+            ctx.moveTo(x - 150, y);
+            ctx.lineTo(x - 50, y); // Vcc to op-amp
+            ctx.moveTo(x + 50, y);
+            ctx.lineTo(x + 150, y); // Output to ground-like
+            ctx.stroke();
+        }
+
+        function resetForm() {
+            document.getElementById('vcc').value = '12';
+            document.getElementById('gain').value = '2';
+            document.getElementById('rf').value = '';
+            document.getElementById('config').value = 'non-inverting';
+            document.getElementById('result').innerHTML = '';
+            const canvas = document.getElementById('circuitCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function exportImage() {
+            const canvas = document.getElementById('circuitCanvas');
+            const link = document.createElement('a');
+            link.download = 'op_amp_circuit.png';
+            // Ensure canvas is fully rendered before export
+            setTimeout(() => {
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }, 150); // Increased delay for better reliability
+        }
+
+        // Initialize with default values
+        window.addEventListener('load', () => calculateOpAmp());
+    </script>
+</body>
+</html>

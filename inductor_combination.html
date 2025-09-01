@@ -1,0 +1,228 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inductor Combination Calculator - tirotir.by</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+            text-align: center;
+            background-color: #f5f5f5;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        input, select, button {
+            padding: 10px;
+            margin: 5px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        canvas {
+            border: 1px solid #333;
+            background-color: white;
+            margin-top: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #result {
+            margin: 20px 0;
+            font-size: 18px;
+            line-height: 1.5;
+        }
+        .error {
+            color: #d32f2f;
+            font-weight: bold;
+        }
+        footer {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #666;
+        }
+        @media (max-width: 600px) {
+            input, select, button {
+                width: 80%;
+            }
+            canvas {
+                width: 100%;
+                height: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>Inductor Combination Calculator</h1>
+    <p>Calculate equivalent inductance for series or parallel combinations.</p>
+    <div class="input-group">
+        <label title="First inductor value">Inductor 1 (L1, mH):</label>
+        <input type="number" id="l1" value="10" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label title="Second inductor value">Inductor 2 (L2, mH):</label>
+        <input type="number" id="l2" value="10" min="0.01" step="any">
+    </div>
+    <div class="input-group">
+        <label title="Configuration type">Configuration:</label>
+        <select id="config" aria-label="Select inductor configuration">
+            <option value="series">Series</option>
+            <option value="parallel">Parallel</option>
+        </select>
+    </div>
+    <button onclick="calculateInductor()">Calculate</button>
+    <button onclick="resetForm()">Reset</button>
+    <button onclick="exportImage()">Export Image</button>
+    <div id="result"></div>
+    <canvas id="circuitCanvas" width="800" height="300"></canvas>
+    <footer>Powered by tirotir.by</footer>
+
+    <script>
+        function calculateInductor() {
+            const L1 = parseFloat(document.getElementById('l1').value) * 1e-3; // mH to H
+            const L2 = parseFloat(document.getElementById('l2').value) * 1e-3; // mH to H
+            const config = document.getElementById('config').value;
+            const resultDiv = document.getElementById('result');
+            const canvas = document.getElementById('circuitCanvas');
+            const ctx = canvas.getContext('2d');
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (isNaN(L1) || isNaN(L2) || L1 <= 0 || L2 <= 0) {
+                resultDiv.innerHTML = '<span class="error">Invalid input: L1 and L2 must be positive.</span>';
+                return;
+            }
+
+            let Leq;
+            if (config === 'series') {
+                Leq = L1 + L2;
+            } else {
+                Leq = (L1 * L2) / (L1 + L2);
+            }
+            resultDiv.innerHTML = `Equivalent Inductance (Leq) = ${(Leq * 1000).toFixed(2)} mH`;
+            drawCircuit(ctx, L1 * 1000, L2 * 1000, config);
+        }
+
+        function drawInductor(ctx, x, y, label) {
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 5; i++) {
+                ctx.moveTo(x - 40 + i * 15, y - 10);
+                ctx.bezierCurveTo(x - 30 + i * 15, y - 20, x - 20 + i * 15, y + 20, x - 10 + i * 15, y + 10);
+            }
+            ctx.moveTo(x - 50, y);
+            ctx.lineTo(x - 40, y);
+            ctx.moveTo(x + 10, y);
+            ctx.lineTo(x + 50, y);
+            ctx.fillStyle = '#333';
+            ctx.font = '14px Arial';
+            ctx.fillText(label, x - 25, y + 30);
+            ctx.stroke();
+        }
+
+        function drawCircuit(ctx, L1, L2, config) {
+            const x = 400;
+            const y = 150;
+            ctx.beginPath();
+            ctx.strokeStyle = '#333';
+            ctx.lineWidth = 2;
+            if (config === 'series') {
+                drawInductor(ctx, x - 100, y, `L1 (${L1.toFixed(2)}mH)`);
+                drawInductor(ctx, x + 100, y, `L2 (${L2.toFixed(2)}mH)`);
+                ctx.moveTo(x - 150, y);
+                ctx.lineTo(x - 50, y);
+                ctx.moveTo(x + 50, y);
+                ctx.lineTo(x + 150, y);
+            } else {
+                drawInductor(ctx, x - 100, y - 50, `L1 (${L1.toFixed(2)}mH)`);
+                drawInductor(ctx, x - 100, y + 50, `L2 (${L2.toFixed(2)}mH)`);
+                ctx.moveTo(x - 150, y - 50);
+                ctx.lineTo(x - 50, y - 50);
+                ctx.moveTo(x - 150, y + 50);
+                ctx.lineTo(x - 50, y + 50);
+                ctx.moveTo(x - 50, y - 50);
+                ctx.lineTo(x - 50, y + 50);
+                ctx.moveTo(x + 50, y - 50);
+                ctx.lineTo(x + 50, y + 50);
+                ctx.lineTo(x + 150, y);
+            }
+            ctx.stroke();
+        }
+
+        function resetForm() {
+            document.getElementById('l1').value = '10';
+            document.getElementById('l2').value = '10';
+            document.getElementById('config').value = 'series';
+            document.getElementById('result').innerHTML = '';
+            const canvas = document.getElementById('circuitCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function exportImage() {
+            const canvas = document.getElementById('circuitCanvas');
+            setTimeout(() => {
+                const link = document.createElement('a');
+                link.download = 'inductor_combination.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }, 100);
+        }
+    </script>
+</body>
+</html>
